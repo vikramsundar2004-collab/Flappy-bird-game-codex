@@ -11,6 +11,28 @@ const PIPE_WIDTH = 64;
 const PIPE_GAP = 165;
 const PIPE_SPAWN_MS = 1450;
 const PIPE_SPEED = 150;
+const TILE = 4;
+
+const PALETTE = {
+  skyTop: "#c7f2f2",
+  skyMid: "#d8f6ff",
+  skyLow: "#f4fbff",
+  cloud: "#ffffff",
+  cloudShade: "#eaf5f6",
+  pipeMain: "#8dcfbf",
+  pipeShade: "#70b8a8",
+  pipeCap: "#b4e0d5",
+  groundTop: "#d5c8a2",
+  groundMid: "#c6b488",
+  groundDark: "#a78f66",
+  hudText: "#4f5d66",
+  birdYellow: "#f5df92",
+  birdCream: "#fff6d7",
+  birdPeach: "#f7c8a8",
+  birdOrange: "#f1a67c",
+  beak: "#f6b184",
+  eye: "#2f3a40"
+};
 
 const BIRD = {
   x: 110,
@@ -27,6 +49,62 @@ let spawnTimer = 0;
 let score = 0;
 let best = Number(localStorage.getItem("flappy-best-score") || 0);
 let pipes = [];
+let groundOffset = 0;
+
+ctx.imageSmoothingEnabled = false;
+canvas.style.imageRendering = "pixelated";
+
+const DIGITS = {
+  0: ["111", "101", "101", "101", "111"],
+  1: ["010", "110", "010", "010", "111"],
+  2: ["111", "001", "111", "100", "111"],
+  3: ["111", "001", "111", "001", "111"],
+  4: ["101", "101", "111", "001", "001"],
+  5: ["111", "100", "111", "001", "111"],
+  6: ["111", "100", "111", "101", "111"],
+  7: ["111", "001", "010", "010", "010"],
+  8: ["111", "101", "111", "101", "111"],
+  9: ["111", "101", "111", "001", "111"]
+};
+
+const PIXEL_BIRD = {
+  up: [
+    "000111100000",
+    "001222211000",
+    "012112211100",
+    "012111111100",
+    "122111133300",
+    "011111333300",
+    "001111133000",
+    "000111100000"
+  ],
+  mid: [
+    "000111100000",
+    "001222211000",
+    "012112211100",
+    "122111111100",
+    "111111133300",
+    "011111333300",
+    "001111133000",
+    "000111100000"
+  ],
+  down: [
+    "000111100000",
+    "001222211000",
+    "012111211100",
+    "122111111100",
+    "111111133300",
+    "001111333300",
+    "000111133000",
+    "000011100000"
+  ]
+};
+
+const BIRD_COLORS = {
+  1: PALETTE.birdYellow,
+  2: PALETTE.birdCream,
+  3: PALETTE.beak
+};
 
 function resetGame() {
   state = "ready";
@@ -35,6 +113,7 @@ function resetGame() {
   score = 0;
   spawnTimer = 0;
   pipes = [];
+  groundOffset = 0;
   setOverlay("Ready?", "Tap, click, or press Space to start.");
 }
 
@@ -107,6 +186,8 @@ function update(dt) {
   }
 
   const dx = PIPE_SPEED * dt;
+  groundOffset = (groundOffset + dx) % 24;
+
   for (const pipe of pipes) {
     pipe.x -= dx;
 
@@ -124,93 +205,78 @@ function update(dt) {
 }
 
 function drawBackground() {
-  const sky = ctx.createLinearGradient(0, 0, 0, HEIGHT);
-  sky.addColorStop(0, "#8fd8ff");
-  sky.addColorStop(1, "#dff6ff");
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  px(0, 0, WIDTH, HEIGHT, PALETTE.skyTop);
+  px(0, HEIGHT * 0.2, WIDTH, HEIGHT * 0.35, PALETTE.skyMid);
+  px(0, HEIGHT * 0.55, WIDTH, HEIGHT * 0.45, PALETTE.skyLow);
 
-  ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
-  ctx.beginPath();
-  ctx.arc(80, 90, 26, 0, Math.PI * 2);
-  ctx.arc(104, 84, 22, 0, Math.PI * 2);
-  ctx.arc(128, 92, 18, 0, Math.PI * 2);
-  ctx.fill();
+  drawCloud(56, 84);
+  drawCloud(294, 136);
+}
 
-  ctx.beginPath();
-  ctx.arc(295, 145, 22, 0, Math.PI * 2);
-  ctx.arc(315, 137, 18, 0, Math.PI * 2);
-  ctx.arc(336, 145, 16, 0, Math.PI * 2);
-  ctx.fill();
+function drawCloud(x, y) {
+  px(x, y, 52, 20, PALETTE.cloud);
+  px(x + 10, y - 8, 30, 8, PALETTE.cloud);
+  px(x + 6, y + 20, 40, 4, PALETTE.cloudShade);
 }
 
 function drawPipes() {
   for (const pipe of pipes) {
-    const x = pipe.x;
-    const topH = pipe.top;
-    const bottomY = pipe.top + PIPE_GAP;
+    const x = snap(pipe.x);
+    const topH = snap(pipe.top);
+    const bottomY = snap(pipe.top + PIPE_GAP);
     const bottomH = HEIGHT - GROUND_HEIGHT - bottomY;
 
-    ctx.fillStyle = "#4aa13f";
-    ctx.fillRect(x, 0, PIPE_WIDTH, topH);
-    ctx.fillRect(x, bottomY, PIPE_WIDTH, bottomH);
-
-    ctx.fillStyle = "#62bf54";
-    ctx.fillRect(x - 4, topH - 18, PIPE_WIDTH + 8, 18);
-    ctx.fillRect(x - 4, bottomY, PIPE_WIDTH + 8, 18);
+    drawPipeSegment(x, 0, PIPE_WIDTH, topH, false);
+    drawPipeSegment(x, bottomY, PIPE_WIDTH, bottomH, true);
   }
 }
 
-function drawGround() {
-  ctx.fillStyle = "#d7b56d";
-  ctx.fillRect(0, HEIGHT - GROUND_HEIGHT, WIDTH, GROUND_HEIGHT);
+function drawPipeSegment(x, y, w, h, upsideDownCap) {
+  px(x, y, w, h, PALETTE.pipeMain);
+  px(x, y, 8, h, PALETTE.pipeShade);
+  px(x + w - 10, y, 6, h, PALETTE.pipeShade);
 
-  ctx.fillStyle = "#be9655";
-  for (let x = 0; x < WIDTH; x += 22) {
-    ctx.fillRect(x, HEIGHT - GROUND_HEIGHT + 8, 12, 4);
+  const capH = 16;
+  const capY = upsideDownCap ? y : y + h - capH;
+  px(x - 4, capY, w + 8, capH, PALETTE.pipeCap);
+  px(x - 4, capY, 8, capH, PALETTE.pipeShade);
+  px(x + w - 4, capY, 8, capH, PALETTE.pipeShade);
+}
+
+function drawGround() {
+  const y = HEIGHT - GROUND_HEIGHT;
+  px(0, y, WIDTH, GROUND_HEIGHT, PALETTE.groundTop);
+  px(0, y + 10, WIDTH, GROUND_HEIGHT - 10, PALETTE.groundMid);
+  px(0, y + GROUND_HEIGHT - 18, WIDTH, 18, PALETTE.groundDark);
+
+  for (let x = -24; x < WIDTH + 24; x += 24) {
+    const tx = x - groundOffset;
+    px(tx, y + 14, 12, 5, PALETTE.groundDark);
+    px(tx + 12, y + 20, 12, 5, PALETTE.groundDark);
   }
 }
 
 function drawBird() {
-  const angle = Math.max(-0.5, Math.min(1.1, BIRD.vy / 350));
-  ctx.save();
-  ctx.translate(BIRD.x, BIRD.y);
-  ctx.rotate(angle);
+  const pose = BIRD.vy < -80 ? PIXEL_BIRD.up : BIRD.vy > 120 ? PIXEL_BIRD.down : PIXEL_BIRD.mid;
+  const startX = snap(BIRD.x - 24);
+  const startY = snap(BIRD.y - 16);
 
-  ctx.fillStyle = "#ffdf32";
-  ctx.beginPath();
-  ctx.arc(0, 0, BIRD.r, 0, Math.PI * 2);
-  ctx.fill();
+  for (let row = 0; row < pose.length; row += 1) {
+    for (let col = 0; col < pose[row].length; col += 1) {
+      const cell = pose[row][col];
+      if (cell === "0") continue;
+      px(startX + col * TILE, startY + row * TILE, TILE, TILE, BIRD_COLORS[cell]);
+    }
+  }
 
-  ctx.fillStyle = "#f4c000";
-  ctx.beginPath();
-  ctx.ellipse(-4, 2, 8, 6, -0.2, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = "#ff8f1f";
-  ctx.beginPath();
-  ctx.moveTo(BIRD.r - 1, 1);
-  ctx.lineTo(BIRD.r + 12, 5);
-  ctx.lineTo(BIRD.r - 1, 10);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.fillStyle = "#0d2230";
-  ctx.beginPath();
-  ctx.arc(5, -5, 2.6, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
+  px(startX + 30, startY + 12, TILE, TILE, PALETTE.eye);
+  px(startX + 34, startY + 12, TILE, TILE, PALETTE.eye);
 }
 
 function drawHUD() {
-  ctx.fillStyle = "#0d2230";
-  ctx.font = "bold 32px Trebuchet MS, sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText(String(score), WIDTH / 2, 56);
-
-  ctx.font = "bold 16px Trebuchet MS, sans-serif";
-  ctx.textAlign = "left";
-  ctx.fillText(`Best: ${best}`, 14, 30);
+  drawPixelNumber(String(score), WIDTH / 2 - scoreToWidth(score) / 2, 34, 6, PALETTE.hudText);
+  drawLabel("BEST", 14, 16, 2, PALETTE.hudText);
+  drawPixelNumber(String(best), 14, 34, 4, PALETTE.hudText);
 }
 
 function render() {
@@ -266,3 +332,59 @@ overlay.addEventListener("pointerdown", handleInput);
 
 resetGame();
 requestAnimationFrame(frame);
+
+function px(x, y, w, h, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(snap(x), snap(y), snap(w), snap(h));
+}
+
+function snap(value) {
+  return Math.round(value);
+}
+
+function scoreToWidth(value) {
+  const length = String(value).length;
+  return length * ((3 * 6) + 6) - 6;
+}
+
+function drawPixelNumber(value, x, y, scale, color) {
+  const chars = String(value).split("");
+  let cursor = x;
+  for (const char of chars) {
+    cursor += drawDigit(char, cursor, y, scale, color) + scale;
+  }
+}
+
+function drawDigit(digit, x, y, scale, color) {
+  const pattern = DIGITS[digit] || DIGITS[0];
+  for (let row = 0; row < pattern.length; row += 1) {
+    for (let col = 0; col < pattern[row].length; col += 1) {
+      if (pattern[row][col] === "1") {
+        px(x + col * scale, y + row * scale, scale, scale, color);
+      }
+    }
+  }
+  return pattern[0].length * scale;
+}
+
+function drawLabel(text, x, y, scale, color) {
+  const glyphs = {
+    B: ["110", "101", "110", "101", "110"],
+    E: ["111", "100", "110", "100", "111"],
+    S: ["111", "100", "111", "001", "111"],
+    T: ["111", "010", "010", "010", "010"]
+  };
+  let cursor = x;
+  for (const char of text) {
+    const pattern = glyphs[char];
+    if (!pattern) continue;
+    for (let row = 0; row < pattern.length; row += 1) {
+      for (let col = 0; col < pattern[row].length; col += 1) {
+        if (pattern[row][col] === "1") {
+          px(cursor + col * scale, y + row * scale, scale, scale, color);
+        }
+      }
+    }
+    cursor += (pattern[0].length + 1) * scale;
+  }
+}
